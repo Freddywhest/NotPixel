@@ -69,7 +69,11 @@ Also for quick launch you can use arguments, for example:
 
 OR
 
-~/NotPixel >>> node index.js --action=2
+~/NotPixel >>> node index.js --action=2 #session
+
+OR
+
+~/NotPixel >>> node index.js --action=3 #query_id
 
 #1 - Create session
 #2 - Run clicker
