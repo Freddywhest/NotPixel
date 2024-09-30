@@ -289,7 +289,6 @@ class Tapper {
         const currentTime = _.floor(Date.now() / 1000);
         if (currentTime - access_token_created_time >= 1800) {
           const tg_web_data = await this.#get_tg_web_data();
-          console.log(tg_web_data);
 
           if (
             _.isNull(tg_web_data) ||
@@ -310,7 +309,6 @@ class Tapper {
         }
 
         profile_data = await this.api.get_user_info(http_client);
-        console.log(profile_data);
 
         if (_.isEmpty(profile_data)) {
           continue;
