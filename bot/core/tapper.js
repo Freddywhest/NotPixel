@@ -311,6 +311,7 @@ class Tapper {
         profile_data = await this.api.get_user_info(http_client);
 
         if (_.isEmpty(profile_data)) {
+          access_token_created_time = 0;
           continue;
         }
 
