@@ -356,19 +356,26 @@ class Tapper {
         if (
           (!mine_data?.tasks.hasOwnProperty("x:notcoin") ||
             !mine_data?.tasks.hasOwnProperty("joinSquad") ||
+            !mine_data?.tasks.hasOwnProperty("makePixelAvatar") ||
             !mine_data?.tasks.hasOwnProperty("x:notpixel")) &&
           settings.AUTO_CLAIM_TASKS == true
         ) {
-          const ran_sleep = _.random(
-            settings.DELAY_BETWEEN_TASKS[0],
-            settings.DELAY_BETWEEN_TASKS[1]
-          );
-          logger.info(
-            `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Sleeping for ${ran_sleep} seconds before claiming tasks...`
-          );
-          await sleep(ran_sleep);
-          const tasks = ["x:notcoin", "x:notpixel", "joinSquad"];
+          const tasks = [
+            "x:notcoin",
+            "x:notpixel",
+            "joinSquad",
+            "makePixelAvatar",
+          ];
+          let task_data;
           for (let i = 0; i < tasks.length; i++) {
+            const ran_sleep = _.random(
+              settings.DELAY_BETWEEN_TASKS[0],
+              settings.DELAY_BETWEEN_TASKS[1]
+            );
+            logger.info(
+              `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Sleeping for ${ran_sleep} seconds before claiming tasks <la>${task}</la>`
+            );
+            await sleep(ran_sleep);
             const task = tasks[i];
             if (mine_data?.tasks.hasOwnProperty(task)) {
               continue;
@@ -376,10 +383,19 @@ class Tapper {
             if (_.isNull(profile_data?.squad?.id) && task == "joinSquad") {
               continue;
             }
-            const task_data = await this.api.claim_task(
+            task_data = await this.api.claim_task(
               http_client,
               task.includes("x") ? `x?name=${task?.split(":")[1]}` : task
             );
+            if (
+              task == "makePixelAvatar" &&
+              task_data?.makePixelAvatar == false
+            ) {
+              task_data = await this.api.claim_task(
+                http_client,
+                task.includes("x") ? `x?name=${task?.split(":")[1]}` : task
+              );
+            }
             if (!_.isEmpty(task_data)) {
               logger.success(
                 `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Claimed <pi>${task}</pi>`
