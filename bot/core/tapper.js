@@ -373,7 +373,7 @@ class Tapper {
               settings.DELAY_BETWEEN_TASKS[1]
             );
             logger.info(
-              `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Sleeping for ${ran_sleep} seconds before claiming tasks <la>${task}</la>`
+              `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Sleeping for ${ran_sleep} seconds before claiming tasks <la>${tasks[i]}</la>`
             );
             await sleep(ran_sleep);
             const task = tasks[i];
