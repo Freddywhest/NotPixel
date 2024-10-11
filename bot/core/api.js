@@ -1,6 +1,8 @@
 const app = require("../config/app");
 const logger = require("../utils/logger");
+const WebSocket = require("ws");
 var _ = require("lodash");
+const _isArray = require("../utils/_isArray");
 
 class ApiRequest {
   constructor(session_name, bot_name) {
@@ -63,6 +65,53 @@ class ApiRequest {
     }
   }
 
+  async get_pixels_info() {
+    const url = "wss://notpx.app/api/v2/image/ws";
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(url);
+      let isResolved = false;
+
+      ws.on("open", () => {});
+
+      ws.on("message", (data) => {
+        if (isResolved) return;
+
+        const response = data.toString();
+        try {
+          if (_isArray(response)) {
+            const parsedResponse = JSON.parse(response);
+            if (parsedResponse && parsedResponse.data) {
+              isResolved = true;
+              resolve(parsedResponse.data);
+            } else {
+              // Если формат неверный, разбиваем ответ на строки и возвращаем
+              isResolved = true;
+              resolve(response.split("\n"));
+            }
+          } else {
+            isResolved = true;
+            resolve(response.split("\n")); // Возвращаем ответ в виде массива строк
+          }
+        } catch (error) {
+          if (!isResolved) {
+            isResolved = true;
+            reject(new Error("WebSocket ошибка: " + error.message));
+          }
+        } finally {
+          ws.close();
+        }
+      });
+
+      ws.on("error", (error) => {
+        if (!isResolved) {
+          isResolved = true;
+          reject(new Error("WebSocket ошибка: " + error.message));
+          ws.close();
+        }
+      });
+    });
+  }
+
   async claim_mine(http_client) {
     try {
       const response = await http_client.get(
@@ -119,8 +168,6 @@ class ApiRequest {
       );
       return response?.data;
     } catch (error) {
-      console.log(error);
-
       if (error?.response?.status >= 500 && error?.response?.status <= 599) {
         return null;
       }

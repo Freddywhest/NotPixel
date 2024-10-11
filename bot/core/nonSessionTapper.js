@@ -185,6 +185,8 @@ class NonSessionTapper {
 
         if (
           (!mine_data?.tasks.hasOwnProperty("x:notcoin") ||
+            !mine_data?.tasks.hasOwnProperty("jettonTask") ||
+            !mine_data?.tasks.hasOwnProperty("makePixelAvatar") ||
             !mine_data?.tasks.hasOwnProperty("x:notpixel")) &&
           settings.AUTO_CLAIM_TASKS == true
         ) {
@@ -196,16 +198,36 @@ class NonSessionTapper {
             `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Sleeping for ${ran_sleep} seconds before claiming tasks...`
           );
           await sleep(ran_sleep);
-          const tasks = ["x:notcoin", "x:notpixel"];
+          const tasks = ["x:notcoin", "jettonTask", "x:notpixel", "jettonTask"];
           for (let i = 0; i < tasks.length; i++) {
+            const ran_sleep = _.random(
+              settings.DELAY_BETWEEN_TASKS[0],
+              settings.DELAY_BETWEEN_TASKS[1]
+            );
+            logger.info(
+              `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Sleeping for ${ran_sleep} seconds before claiming tasks <la>${tasks[i]}</la>`
+            );
+            await sleep(ran_sleep);
             const task = tasks[i];
             if (mine_data?.tasks.hasOwnProperty(task)) {
               continue;
             }
-            const task_data = await this.api.claim_task(
+            if (_.isNull(profile_data?.squad?.id) && task == "joinSquad") {
+              continue;
+            }
+            task_data = await this.api.claim_task(
               http_client,
               task.includes("x") ? `x?name=${task?.split(":")[1]}` : task
             );
+            if (
+              task == "makePixelAvatar" &&
+              task_data?.makePixelAvatar == false
+            ) {
+              task_data = await this.api.claim_task(
+                http_client,
+                task.includes("x") ? `x?name=${task?.split(":")[1]}` : task
+              );
+            }
             if (!_.isEmpty(task_data)) {
               logger.success(
                 `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Claimed <pi>${task}</pi>`
@@ -215,9 +237,12 @@ class NonSessionTapper {
 
           await sleep(3);
 
+          let position;
+          let hex;
+
           if (settings.AUTO_PAINT == true) {
             let paintCount = 0;
-            while (_.gt(mine_data?.charges, 0) && _.lt(paintCount, 10)) {
+            while (_.gt(mine_data?.charges, 0) && _.lt(paintCount, 100)) {
               const ran_sleep = _.random(
                 settings.DELAY_BETWEEN_PAINTING[0],
                 settings.DELAY_BETWEEN_PAINTING[1]
@@ -226,14 +251,52 @@ class NonSessionTapper {
                 `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Sleeping for ${ran_sleep} seconds before painting...`
               );
               await sleep(ran_sleep);
+              pixels_data = await this.api.get_pixels_info(); // Получение массива данных пикселей
+              if (pixels_data[0].startsWith("pixelUpdate")) {
+                // Условие проверки данных пикселей
+                fs.readFile("picture.txt", "utf8", (err, data) => {
+                  if (err) {
+                    console.error(err);
+                    return;
+                  }
+
+                  const pictureData = data
+                    .trim()
+                    .split("\n")
+                    .map((line) => {
+                      const [id, hex] = line.split("-");
+                      return { id: id.trim(), hex: hex.trim() };
+                    });
+
+                  // Проверка каждого пикселя
+                  let flag = 0;
+                  for (const pixel of pixels_data) {
+                    const [_, id, pixelHex] = pixel.split(":");
+
+                    for (const { id: pictureId, hex: picHex } of pictureData) {
+                      if (id === pictureId && pixelHex !== picHex) {
+                        position = id; // Присваиваем ID
+                        hex = picHex; // Присваиваем hex из picture.txt
+                        flag = 1;
+                        break; // Выход
+                      }
+                    }
+                    if (flag === 1) {
+                      break;
+                    }
+                  }
+                });
+              } else {
+                // Плохие данные - делает как обычно х1, Хорошие - рисует картину х3
+                hex = fetchers.randomHex();
+                position = fetchers.randomPosition();
+              }
               logger.info(
                 `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Painting left <la>${mine_data?.charges} charges</la>`
               );
-              const hex = fetchers.randomHex();
-              const position = fetchers.randomPosition();
               const repaint = await this.api.repaint(http_client, {
+                pixelId: Number(position),
                 newColor: hex,
-                pixelId: position,
               });
 
               if (!_.isEmpty(repaint)) {

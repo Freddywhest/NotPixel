@@ -16,6 +16,7 @@ const taskFilter = require("../utils/taskFilter");
 const _isArray = require("../utils/_isArray");
 const FdyTmp = require("fdy-tmp");
 const Fetchers = require("../utils/fetchers");
+const MAX_MINING_TIME = 65;
 
 class Tapper {
   constructor(tg_client) {
@@ -259,6 +260,7 @@ class Tapper {
 
     let profile_data;
     let mine_data;
+    let pixels_data; // Моя переменная информации пикселей 228
 
     const fetchers = new Fetchers(this.api, this.session_name, this.bot_name);
 
@@ -287,7 +289,7 @@ class Tapper {
     while (true) {
       try {
         const currentTime = _.floor(Date.now() / 1000);
-        if (currentTime - access_token_created_time >= 1800) {
+        if (currentTime - access_token_created_time >= 900) {
           const tg_web_data = await this.#get_tg_web_data();
 
           if (
@@ -332,7 +334,7 @@ class Tapper {
           continue;
         }
 
-        if (_.lte(mine_data?.maxMiningTime, mine_data?.fromStart)) {
+        if (_.lte(MAX_MINING_TIME, mine_data?.fromStart)) {
           const claim = await this.api.claim_mine(http_client);
           if (!_.isEmpty(claim)) {
             logger.success(
@@ -357,6 +359,7 @@ class Tapper {
           (!mine_data?.tasks.hasOwnProperty("x:notcoin") ||
             !mine_data?.tasks.hasOwnProperty("joinSquad") ||
             !mine_data?.tasks.hasOwnProperty("makePixelAvatar") ||
+            !mine_data?.tasks.hasOwnProperty("jettonTask") ||
             !mine_data?.tasks.hasOwnProperty("x:notpixel")) &&
           settings.AUTO_CLAIM_TASKS == true
         ) {
@@ -365,6 +368,7 @@ class Tapper {
             "x:notpixel",
             "joinSquad",
             "makePixelAvatar",
+            "jettonTask",
           ];
           let task_data;
           for (let i = 0; i < tasks.length; i++) {
@@ -404,43 +408,84 @@ class Tapper {
           }
 
           await sleep(3);
-
-          if (settings.AUTO_PAINT == true) {
-            let paintCount = 0;
-            while (_.gt(mine_data?.charges, 0) && _.lt(paintCount, 10)) {
-              const ran_sleep = _.random(
-                settings.DELAY_BETWEEN_PAINTING[0],
-                settings.DELAY_BETWEEN_PAINTING[1]
-              );
-              logger.info(
-                `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Sleeping for ${ran_sleep} seconds before painting...`
-              );
-              await sleep(ran_sleep);
-              logger.info(
-                `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Painting left <la>${mine_data?.charges} charges</la>`
-              );
-              const hex = fetchers.randomHex();
-              const position = fetchers.randomPosition();
-              const repaint = await this.api.repaint(http_client, {
-                newColor: hex,
-                pixelId: position,
-              });
-
-              if (!_.isEmpty(repaint)) {
-                logger.success(
-                  `<ye>[${this.bot_name}]</ye> | ${this.session_name} | 💰 Painted pixel | Color: <la>${hex}</la>`
-                );
-              }
-              paintCount++;
-              mine_data = await this.api.get_mine_info(http_client);
-            }
-          }
-          await sleep(3);
-
-          logger.info(
-            `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Balance: <la>${mine_data?.userBalance}PX</la>`
-          );
         }
+
+        let position;
+        let hex;
+
+        if (settings.AUTO_PAINT == true) {
+          let paintCount = 0;
+          while (_.gt(mine_data?.charges, 0) && _.lt(paintCount, 100)) {
+            const ran_sleep = _.random(
+              settings.DELAY_BETWEEN_PAINTING[0],
+              settings.DELAY_BETWEEN_PAINTING[1]
+            );
+            logger.info(
+              `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Sleeping for ${ran_sleep} seconds before painting...`
+            );
+            await sleep(ran_sleep);
+            pixels_data = await this.api.get_pixels_info(); // Получение массива данных пикселей
+            if (pixels_data[0].startsWith("pixelUpdate")) {
+              // Условие проверки данных пикселей
+              fs.readFile("picture.txt", "utf8", (err, data) => {
+                if (err) {
+                  console.error(err);
+                  return;
+                }
+
+                const pictureData = data
+                  .trim()
+                  .split("\n")
+                  .map((line) => {
+                    const [id, hex] = line.split("-");
+                    return { id: id.trim(), hex: hex.trim() };
+                  });
+
+                // Проверка каждого пикселя
+                let flag = 0;
+                for (const pixel of pixels_data) {
+                  const [_, id, pixelHex] = pixel.split(":");
+
+                  for (const { id: pictureId, hex: picHex } of pictureData) {
+                    if (id === pictureId && pixelHex !== picHex) {
+                      position = id; // Присваиваем ID
+                      hex = picHex; // Присваиваем hex из picture.txt
+                      flag = 1;
+                      break; // Выход
+                    }
+                  }
+                  if (flag === 1) {
+                    break;
+                  }
+                }
+              });
+            } else {
+              // Плохие данные - делает как обычно х1, Хорошие - рисует картину х3
+              hex = fetchers.randomHex();
+              position = fetchers.randomPosition();
+            }
+            logger.info(
+              `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Painting left <la>${mine_data?.charges} charges</la>`
+            );
+            const repaint = await this.api.repaint(http_client, {
+              pixelId: Number(position),
+              newColor: hex,
+            });
+
+            if (!_.isEmpty(repaint)) {
+              logger.success(
+                `<ye>[${this.bot_name}]</ye> | ${this.session_name} | 💰 Painted pixel | Color: <la>${hex}</la>`
+              );
+            }
+            paintCount++;
+            mine_data = await this.api.get_mine_info(http_client);
+          }
+        }
+        await sleep(3);
+
+        logger.info(
+          `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Balance: <la>${mine_data?.userBalance}PX</la>`
+        );
       } catch (error) {
         logger.error(
           `<ye>[${this.bot_name}]</ye> | ${this.session_name} | ❗️Unknown error: ${error}`
