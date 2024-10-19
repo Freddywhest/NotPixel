@@ -16,7 +16,7 @@ const taskFilter = require("../utils/taskFilter");
 const _isArray = require("../utils/_isArray");
 const FdyTmp = require("fdy-tmp");
 const Fetchers = require("../utils/fetchers");
-const MAX_MINING_TIME = 65;
+const MAX_MINING_TIME = 65; // Время ожидания от начала фарма перед тем как забрать награду фарма (фарм можно забрать после 60 секнуд от начала фарма)
 
 class Tapper {
   constructor(tg_client) {
@@ -261,6 +261,7 @@ class Tapper {
     let profile_data;
     let mine_data;
     let pixels_data; // Моя переменная информации пикселей 228
+    let fromError = false;
 
     const fetchers = new Fetchers(this.api, this.session_name, this.bot_name);
 
@@ -311,9 +312,25 @@ class Tapper {
         }
 
         profile_data = await this.api.get_user_info(http_client);
+        const readPicture = fs.readFileSync("picture.txt", {
+          flag: "r",
+          encoding: "utf-8",
+        });
+
+        const pictureData = readPicture
+          .trim()
+          .split("\n")
+          .map((line) => {
+            const [id, hex] = line.split("-");
+            return { id: id.trim(), hex: hex.trim() };
+          });
 
         if (_.isEmpty(profile_data)) {
+          logger.warning(
+            `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Could not get user info. Trying again after sleep...`
+          );
           access_token_created_time = 0;
+          fromError = true;
           continue;
         }
 
@@ -331,10 +348,15 @@ class Tapper {
         profile_data = await this.api.get_user_info(http_client);
 
         if (_.isEmpty(profile_data)) {
+          access_token_created_time = 0;
+          fromError = true;
           continue;
         }
 
-        if (_.lte(MAX_MINING_TIME, mine_data?.fromStart)) {
+        if (
+          !_.isEmpty(mine_data) &&
+          _.lte(mine_data?.maxMiningTime, mine_data?.fromStart)
+        ) {
           const claim = await this.api.claim_mine(http_client);
           if (!_.isEmpty(claim)) {
             logger.success(
@@ -356,30 +378,20 @@ class Tapper {
         );
 
         if (
+          !_.isEmpty(mine_data) &&
           (!mine_data?.tasks.hasOwnProperty("x:notcoin") ||
             !mine_data?.tasks.hasOwnProperty("joinSquad") ||
-            !mine_data?.tasks.hasOwnProperty("makePixelAvatar") ||
             !mine_data?.tasks.hasOwnProperty("jettonTask") ||
             !mine_data?.tasks.hasOwnProperty("x:notpixel")) &&
           settings.AUTO_CLAIM_TASKS == true
         ) {
-          const tasks = [
-            "x:notcoin",
-            "x:notpixel",
-            "joinSquad",
-            "makePixelAvatar",
-            "jettonTask",
-          ];
+          const tasks = ["x:notcoin", "x:notpixel", "joinSquad", "jettonTask"];
           let task_data;
           for (let i = 0; i < tasks.length; i++) {
             const ran_sleep = _.random(
               settings.DELAY_BETWEEN_TASKS[0],
               settings.DELAY_BETWEEN_TASKS[1]
             );
-            logger.info(
-              `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Sleeping for ${ran_sleep} seconds before claiming tasks <la>${tasks[i]}</la>`
-            );
-            await sleep(ran_sleep);
             const task = tasks[i];
             if (mine_data?.tasks.hasOwnProperty(task)) {
               continue;
@@ -387,6 +399,10 @@ class Tapper {
             if (_.isNull(profile_data?.squad?.id) && task == "joinSquad") {
               continue;
             }
+            logger.info(
+              `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Sleeping for ${ran_sleep} seconds before claiming tasks <la>${tasks[i]}</la>`
+            );
+            await sleep(ran_sleep);
             task_data = await this.api.claim_task(
               http_client,
               task.includes("x") ? `x?name=${task?.split(":")[1]}` : task
@@ -410,12 +426,14 @@ class Tapper {
           await sleep(3);
         }
 
+        let hex = fetchers.randomHex(); // Вынесено за цикл, чтоб цвет не менялся, будто бы зашел пользователь и у него уже стоял случайный цвет, а менять лень
         let position;
-        let hex;
 
         if (settings.AUTO_PAINT == true) {
           let paintCount = 0;
+          hex = fetchers.randomHex(); // Вынесено за цикл, чтоб цвет не менялся, будто бы зашел пользователь и у него уже стоял случайный цвет, а менять лень
           while (_.gt(mine_data?.charges, 0) && _.lt(paintCount, 100)) {
+            position = fetchers.randomPosition(); // А позицию пользователю менять интересно, это же недолго
             const ran_sleep = _.random(
               settings.DELAY_BETWEEN_PAINTING[0],
               settings.DELAY_BETWEEN_PAINTING[1]
@@ -424,97 +442,89 @@ class Tapper {
               `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Sleeping for ${ran_sleep} seconds before painting...`
             );
             await sleep(ran_sleep);
-            pixels_data = await this.api.get_pixels_info(); // Получение массива данных пикселей
-            if (pixels_data[0].startsWith("pixelUpdate")) {
-              // Условие проверки данных пикселей
-              fs.readFile("picture.txt", "utf8", (err, data) => {
-                if (err) {
-                  console.error(err);
-                  return;
-                }
+            pixels_data = await this.api.get_pixels_info(); // Получение массива обновленных данных пикселей
 
-                const pictureData = data
-                  .trim()
-                  .split("\n")
-                  .map((line) => {
-                    const [id, hex] = line.split("-");
-                    return { id: id.trim(), hex: hex.trim() };
-                  });
-
-                // Проверка каждого пикселя
-                let flag = 0;
-                for (const pixel of pixels_data) {
-                  const [_, id, pixelHex] = pixel.split(":");
-
-                  for (const { id: pictureId, hex: picHex } of pictureData) {
-                    if (id === pictureId && pixelHex !== picHex) {
-                      position = id; // Присваиваем ID
-                      hex = picHex; // Присваиваем hex из picture.txt
-                      flag = 1;
-                      break; // Выход
-                    }
-                  }
-                  if (flag === 1) {
-                    break;
-                  }
-                }
-              });
-            } else {
-              // Плохие данные - делает как обычно х1, Хорошие - рисует картину х3
-              hex = fetchers.randomHex();
-              position = fetchers.randomPosition();
+            if (!pixels_data[0].startsWith("pixelUpdate")) {
+              continue;
             }
+
             logger.info(
               `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Painting left <la>${mine_data?.charges} charges</la>`
             );
+
+            const paint = _.random(0, pictureData.length - 1);
+            console.log(pictureData[paint].id, pictureData[paint].hex);
+
             const repaint = await this.api.repaint(http_client, {
-              pixelId: Number(position),
-              newColor: hex,
+              pixelId: Number(pictureData[paint].id),
+              newColor: pictureData[paint].hex,
             });
 
             if (!_.isEmpty(repaint)) {
+              const reward = _.floor(
+                _.subtract(repaint?.balance, mine_data?.userBalance)
+              );
               logger.success(
-                `<ye>[${this.bot_name}]</ye> | ${this.session_name} | 💰 Painted pixel | Color: <la>${hex}</la>`
+                `<ye>[${this.bot_name}]</ye> | ${this.session_name} | 💰 Painted pixel <gr>(+${reward} PX)</gr> for painting a picture | Color: <la>${pictureData[paint].hex}</la> | Position: <pi>${pictureData[paint].id}</pi>`
+              );
+            } else {
+              logger.warning(
+                `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Failed to paint pixel | Color: <la>${pictureData[paint].hex}</la> | Position: <pi>${pictureData[paint].id}</pi>`
               );
             }
             paintCount++;
             mine_data = await this.api.get_mine_info(http_client);
+            if (_.isEmpty(mine_data)) {
+              break;
+            }
           }
         }
-        await sleep(3);
 
+        await sleep(3);
+        mine_data = await this.api.get_mine_info(http_client);
+        if (_.isEmpty(mine_data)) {
+          continue;
+        }
         logger.info(
-          `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Balance: <la>${mine_data?.userBalance}PX</la>`
+          `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Balance: <la>${mine_data?.userBalance}PX</la> | Painting left: <la>${mine_data?.charges}</la>`
         );
       } catch (error) {
         logger.error(
           `<ye>[${this.bot_name}]</ye> | ${this.session_name} | ❗️Unknown error: ${error}`
         );
       } finally {
-        let ran_sleep;
-        if (_isArray(settings.SLEEP_BETWEEN_REQUESTS)) {
-          if (
-            _.isInteger(settings.SLEEP_BETWEEN_REQUESTS[0]) &&
-            _.isInteger(settings.SLEEP_BETWEEN_REQUESTS[1])
-          ) {
-            ran_sleep = _.random(
-              settings.SLEEP_BETWEEN_REQUESTS[0],
-              settings.SLEEP_BETWEEN_REQUESTS[1]
-            );
+        if (fromError) {
+          logger.info(
+            `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Sleeping for 10 seconds...`
+          );
+          await sleep(10);
+        } else {
+          let ran_sleep;
+          if (_isArray(settings.SLEEP_BETWEEN_REQUESTS)) {
+            if (
+              _.isInteger(settings.SLEEP_BETWEEN_REQUESTS[0]) &&
+              _.isInteger(settings.SLEEP_BETWEEN_REQUESTS[1])
+            ) {
+              ran_sleep = _.random(
+                settings.SLEEP_BETWEEN_REQUESTS[0],
+                settings.SLEEP_BETWEEN_REQUESTS[1]
+              );
+            } else {
+              ran_sleep = _.random(450, 800);
+            }
+          } else if (_.isInteger(settings.SLEEP_BETWEEN_REQUESTS)) {
+            const ran_add = _.random(20, 50);
+            ran_sleep = settings.SLEEP_BETWEEN_REQUESTS + ran_add;
           } else {
             ran_sleep = _.random(450, 800);
           }
-        } else if (_.isInteger(settings.SLEEP_BETWEEN_REQUESTS)) {
-          const ran_add = _.random(20, 50);
-          ran_sleep = settings.SLEEP_BETWEEN_REQUESTS + ran_add;
-        } else {
-          ran_sleep = _.random(450, 800);
-        }
 
-        logger.info(
-          `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Sleeping for ${ran_sleep} seconds...`
-        );
-        await sleep(ran_sleep);
+          logger.info(
+            `<ye>[${this.bot_name}]</ye> | ${this.session_name} | Sleeping for ${ran_sleep} seconds...`
+          );
+          fromError = false;
+          await sleep(ran_sleep);
+        }
       }
     }
   }
